@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shadow Depth - Full Restore</title>
+    <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body, html { height: 100%; overflow: hidden; background: #001a11; font-family: 'Segoe UI', sans-serif; }
+        
+        #viewport { display: flex; width: 300vw; height: 100vh; transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1); }
+        .screen { width: 100vw; height: 100vh; display: flex; flex-direction: column; flex-shrink: 0; position: relative; }
+        body.show-sub #viewport { transform: translateX(-100vw); }
+        body.show-map #viewport { transform: translateX(-200vw); }
+
+        .header { padding: 10px 20px; background: #001a11; color: #f0f4a2; display: flex; align-items: center; min-height: 60px; border-bottom: 1px solid #004d33; z-index: 100; }
+        .header h2 { flex: 1; text-align: center; font-family: 'Arial Black', sans-serif; text-transform: uppercase; font-size: 0.85rem; }
+        .info-btn, .back-link { border: 2px solid #f0f4a2; padding: 5px 12px; border-radius: 4px; font-family: 'Arial Black', sans-serif; font-size: 10px; cursor: pointer; }
+
+        .row-container { display: grid; height: 100%; background: #000; transition: grid-template-rows 0.4s ease; }
+        .row { 
+            display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; 
+            cursor: pointer; background: radial-gradient(circle at center, #004d33 0%, #002b1b 100%); 
+            color: #f0f4a2; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+        .row.active { background: linear-gradient(135deg, #ffffff 0%, #faffc2 50%, #f0f4a2 100%) !important; color: #002b1b !important; }
+        .row.locked { opacity: 0.1; filter: grayscale(1); pointer-events: none !important; }
+        
+        .content-stack { display: flex; align-items: center; gap: 15px; transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1); }
+        .row-logo { width: 45px; height: 45px; object-fit: contain; }
+        .row-text { font-family: 'Arial Black', sans-serif; font-size: 1.1rem; text-transform: uppercase; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); transition: 0.4s; }
+        
+        .row.active .content-stack { transform: scale(1.8); }
+        .row.active .row-text { text-shadow: none; }
+
+        .btn-holder { position: absolute; bottom: 12%; opacity: 0; pointer-events: none; transition: 0.4s; }
+        .row.active .btn-holder { opacity: 1; pointer-events: auto; }
+        .go-btn { background: #002b1b; color: #f0f4a2; padding: 6px 18px; border-radius: 20px; font-family: 'Arial Black', sans-serif; border: none; font-size: 9px; }
+
+        .row.final-submit { background: radial-gradient(circle, #00ff99 0%, #004d33 100%) !important; color: #001a11 !important; }
+
+        #info-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 2000; display: none; align-items: center; justify-content: center; padding: 25px; }
+        .modal-content { background: #f0f4a2; color: #001a11; padding: 25px; border-radius: 12px; width: 100%; max-width: 340px; text-align: center; border: 2px solid #004d33; display: flex; flex-direction: column; max-height: 80vh; }
+        .modal-content h3 { font-family: 'Arial Black'; margin-bottom: 15px; text-transform: uppercase; font-size: 1.2rem; border-bottom: 1px solid rgba(0,77,51,0.2); padding-bottom: 10px; }
+        #m-body { font-size: 14px; margin-bottom: 20px; line-height: 1.5; text-align: justify; overflow-y: auto; padding-right: 5px; font-weight: 500; }
+
+        .display-area { flex: 1; background: #001a11; display: flex; flex-direction: column; align-items: center; padding: 15px; overflow-y: auto; }
+        .map-frame { width: 90vw; height: 90vw; max-width: 400px; max-height: 400px; background: #000; border: 3px solid #f0f4a2; border-radius: 12px; position: relative; overflow: hidden; touch-action: none; }
+        #pz-wrapper { width: 100%; height: 100%; position: relative; cursor: grab; }
+        #map-img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+        .map-segment { fill: none; stroke: rgba(240, 244, 162, 0.4); cursor: pointer; pointer-events: auto; }
+        .map-segment.selected { stroke: #00ff99; }
+        .fixed-label { position: absolute; color: #f0f4a2; font-family: 'Arial Black', sans-serif; font-size: 14px; pointer-events: none; text-shadow: 2px 2px 4px #000; white-space: nowrap; transform-origin: center; }
+
+        .survey-container { width: 100%; max-width: 400px; color: #f0f4a2; padding-bottom: 60px; }
+        .survey-card { background: rgba(0,77,51,0.3); padding: 15px; border-radius: 10px; margin-bottom: 25px; border-bottom: 1px solid #004d33; }
+        .scale-label { display: block; text-align: center; margin-bottom: 12px; font-family: 'Arial Black'; font-size: 12px; color: #ffa500; min-height: 18px; text-transform: uppercase; }
+        .custom-scale { display: flex; gap: 5px; height: 45px; width: 100%; max-width: 320px; margin: 0 auto; }
+        .scale-block { flex: 1; background: #222; cursor: pointer; border: 1px solid rgba(255,255,255,0.05); }
+        .scale-block:first-child { border-top-left-radius: 22px; border-bottom-left-radius: 22px; }
+        .scale-block:last-child { border-top-right-radius: 22px; border-bottom-right-radius: 22px; }
+
+        .custom-scale[data-val="1"] .scale-block:nth-child(1) { background: #ffeb3b; }
+        .custom-scale[data-val="2"] .scale-block:nth-child(1), .custom-scale[data-val="2"] .scale-block:nth-child(2) { background: #ffeb3b; }
+        .custom-scale[data-val="2"] .scale-block:nth-child(2) { background: #ffc107; }
+        .custom-scale[data-val="3"] .scale-block:nth-child(1), .custom-scale[data-val="3"] .scale-block:nth-child(2) { background: #ffeb3b; }
+        .custom-scale[data-val="3"] .scale-block:nth-child(2) { background: #ffc107; }
+        .custom-scale[data-val="3"] .scale-block:nth-child(3) { background: #ff9800; }
+        .custom-scale[data-val="4"] .scale-block:nth-child(1), .custom-scale[data-val="4"] .scale-block:nth-child(2), .custom-scale[data-val="4"] .scale-block:nth-child(3) { background: #ffeb3b; }
+        .custom-scale[data-val="4"] .scale-block:nth-child(2) { background: #ffc107; }
+        .custom-scale[data-val="4"] .scale-block:nth-child(3) { background: #ff9800; }
+        .custom-scale[data-val="4"] .scale-block:nth-child(4) { background: #ff5722; }
+        .custom-scale[data-val="5"] div { background: #f44336 !important; } 
+        .custom-scale[data-val="5"] .scale-block:nth-child(1) { background: #ffeb3b !important; }
+        .custom-scale[data-val="5"] .scale-block:nth-child(2) { background: #ffc107 !important; }
+        .custom-scale[data-val="5"] .scale-block:nth-child(3) { background: #ff9800 !important; }
+        .custom-scale[data-val="5"] .scale-block:nth-child(4) { background: #ff5722 !important; }
+
+        .opt-v { border: 1px solid #f0f4a2; padding: 12px; margin: 8px 0; border-radius: 6px; cursor: pointer; text-align: center; font-size: 11px; font-family: 'Arial Black'; }
+        .opt-v.selected { background: #f0f4a2; color: #001a11; }
+        .floating-complete { background: #f0f4a2; color: #001a11; padding: 12px 30px; border-radius: 30px; font-family: 'Arial Black', sans-serif; border: none; margin: 20px auto; display: block; cursor: pointer; flex-shrink: 0; }
+    </style>
+</head>
+<body onload="init()">
+
+<div id="viewport">
+    <div class="screen">
+        <div class="header"><div class="info-btn" onclick="showModal('Mission Hub', 'Complete all 4 steps to transmit final file.')">INFO</div><h2>DASHBOARD</h2><div style="width:45px"></div></div>
+        <div id="main-grid" class="row-container"></div>
+    </div>
+    <div class="screen">
+        <div class="header"><div class="back-link" onclick="backToMain()">← BACK</div><h2 id="sub-title">STEP</h2><div class="info-btn" onclick="showModal('Task Management', 'Execute protocol segments in order.')">INFO</div></div>
+        <div id="sub-grid" class="row-container"></div>
+    </div>
+    <div class="screen">
+        <div class="header"><div class="back-link" onclick="backToSub()">← BACK</div><h2 id="map-title">CONTENT</h2><div class="info-btn" onclick="showModal('Operational View', 'Validate site data.')">INFO</div></div>
+        <div class="display-area" id="map-content"></div>
+    </div>
+</div>
+
+<div id="info-modal"><div class="modal-content"><h3 id="m-title"></h3><div id="m-body"></div><button class="floating-complete" onclick="closeModal()">DISMISS</button></div></div>
+
+<script>
+    const data = [
+        { name: "Step One", logo: "logo1.png", babies: [
+            { title: "North Sector", type: "map", segs: ["M 10 20 L 90 20"], lbs: [{t: "NORTH", x: 50, y: 15, a: 15}] },
+            { title: "Central Hub", type: "map", segs: ["M 50 10 L 50 90"], lbs: [{t: "CORE", x: 60, y: 50, a: 0}] },
+            { title: "South Sector", type: "map", segs: ["M 10 80 L 90 80"], lbs: [{t: "SOUTH", x: 50, y: 85, a: -10}] }
+        ]},
+        { name: "Step Two", logo: "logo2.png", babies: [
+            { title: "Grid Map Alpha", type: "map", segs: ["M 20 20 L 80 80"], lbs: [{t: "ALPHA", x: 50, y: 40, a: 45}] },
+            { title: "Grid Map Beta", type: "map", segs: ["M 20 80 L 80 20"], lbs: [{t: "BETA", x: 50, y: 60, a: -45}] },
+            { title: "Protocol Test", type: "quiz", mode: "vertical", qs: [{ q: "Encryption ID?", opts: ["Alpha-6", "Beta-9", "Gamma-X", "Delta-0"] }] }
+        ]},
+        { name: "Step Three", logo: "logo3.png", babies: [
+            { title: "Audit Part I", type: "quiz", mode: "scale", qs: Array(3).fill({q: "Operational Metric Check"}) },
+            { title: "Audit Part II", type: "quiz", mode: "scale", qs: Array(3).fill({q: "System Security Review"}) }
+        ]},
+        { name: "Step Four", logo: "logo4.png", babies: [
+            { title: "Final Gate", type: "map", segs: ["M 0 50 L 100 50"], lbs: [{t: "EXIT", x: 50, y: 45, a: 0}] }
+        ]}
+    ];
+
+    let progressMain = 0, babyProgress = { 0: 0, 1: 0, 2: 0, 3: 0 }, activeMainIdx = 0, activeSubIdx = 0, pzInstance = null;
+
+    function init() { renderMain(); selectMain(0); }
+    function showModal(title, text) { document.getElementById('m-title').innerText = title; document.getElementById('m-body').innerText = text; document.getElementById('info-modal').style.display = 'flex'; }
+    function closeModal() { document.getElementById('info-modal').style.display = 'none'; }
+
+    function renderMain() {
+        const grid = document.getElementById('main-grid');
+        let html = data.map((item, i) => `
+            <div id="m-row-${i}" class="row ${i > progressMain ? 'locked' : ''}" onclick="selectMain(${i})">
+                <div class="content-stack"><img src="${item.logo}" class="row-logo"><span class="row-text">${item.name}</span></div>
+                <div class="btn-holder"><button class="go-btn" onclick="openSub(${i}, event)">START →</button></div>
+            </div>`).join('');
+        if(progressMain >= 4) html += `<div id="final-submit-row" class="row final-submit" onclick="selectMain(4)"><div class="content-stack"><span class="row-text">SUBMIT MISSION</span></div><div class="btn-holder"><button class="go-btn" onclick="alert('Mission Transmitted!')">FINISH →</button></div></div>`;
+        grid.innerHTML = html;
+        selectMain(progressMain);
+    }
+
+    function updateRows(id, count, idx) { document.getElementById(id).style.gridTemplateRows = Array(count).fill(0).map((_, i) => i === idx ? '2.5fr' : '1fr').join(' '); }
+
+    function selectMain(idx) {
+        if(idx > progressMain) return;
+        updateRows('main-grid', (progressMain >= 4 ? 5 : 4), idx);
+        data.forEach((_, i) => document.getElementById(`m-row-${i}`)?.classList.toggle('active', i === idx));
+        document.getElementById('final-submit-row')?.classList.toggle('active', idx === 4);
+    }
+
+    function openSub(idx, e) {
+        if(e) e.stopPropagation();
+        activeMainIdx = idx;
+        document.getElementById('sub-title').innerText = data[idx].name;
+        renderSub();
+        document.body.classList.add('show-sub');
+        setTimeout(() => showModal(data[idx].name, `Sector access granted. Complete all baby rows in ${data[idx].name} to advance.`), 200);
+    }
+
+    function renderSub() {
+        const grid = document.getElementById('sub-grid');
+        grid.innerHTML = data[activeMainIdx].babies.map((b, i) => `
+            <div id="s-row-${i}" class="row ${i > babyProgress[activeMainIdx] ? 'locked' : ''}" onclick="selectSub(${i})">
+                <div class="content-stack"><span class="row-text">${b.title}</span></div>
+                <div class="btn-holder"><button class="go-btn" onclick="openContent(${i}, event)">GO →</button></div>
+            </div>`).join('');
+        selectSub(Math.min(babyProgress[activeMainIdx], data[activeMainIdx].babies.length - 1));
+    }
+
+    function selectSub(idx) { if(idx > babyProgress[activeMainIdx]) return; updateRows('sub-grid', data[activeMainIdx].babies.length, idx); data[activeMainIdx].babies.forEach((_, i) => document.getElementById(`s-row-${i}`)?.classList.toggle('active', i === idx)); }
+
+    function openContent(idx, e) {
+        if(e) e.stopPropagation();
+        activeSubIdx = idx;
+        const baby = data[activeMainIdx].babies[idx];
+        const disp = document.getElementById('map-content');
+        document.getElementById('map-title').innerText = baby.title;
+
+        if (baby.type === 'map') {
+            disp.innerHTML = `
+                <div class="map-frame"><div id="pz-wrapper">
+                    <img src="map.png" id="map-img">
+                    <svg style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 100 100">
+                        ${(baby.segs || []).map(path => `<path d="${path}" class="map-segment" onclick="this.classList.toggle('selected')" style="pointer-events:auto;"/>`).join('')}
+                    </svg>
+                    ${(baby.lbs || []).map((l, i) => `<div class="fixed-label" style="left:${l.x}%; top:${l.y}%; transform: translate(-50%, -50%) rotate(${l.a || 0}deg);">${l.t}</div>`).join('')}
+                </div></div><button class="floating-complete" onclick="finish(${idx})">COMPLETE</button>`;
+            setTimeout(initPZ, 50);
+        } else {
+            const quiz = baby.qs.map((q, qidx) => `
+                <div class="survey-card">
+                    <h4>${qidx + 1}. ${q.q}</h4>
+                    ${baby.mode === 'vertical' 
+                        ? q.opts.map(o => `<div class="opt-v" onclick="toggleOption(this)">${o}</div>`).join('') 
+                        : `<div class="scale-label" id="lbl-${qidx}">Select Value</div><div class="custom-scale" data-val="0" id="sc-${qidx}">
+                            ${[1,2,3,4,5].map(v => `<div class="scale-block" onclick="setVal(${qidx}, ${v})"></div>`).join('')}
+                          </div>` 
+                    }
+                </div>`).join('');
+            disp.innerHTML = `<div class="survey-container">${quiz}<button class="floating-complete" onclick="finish(${idx})">SUBMIT</button></div>`;
+        }
+        document.body.classList.add('show-map');
+    }
+
+    function initPZ() {
+        const elem = document.getElementById('pz-wrapper');
+        if(!elem) return;
+        pzInstance = Panzoom(elem, { maxScale: 6, minScale: 1, contain: 'outside' });
+        elem.parentElement.addEventListener('wheel', pzInstance.zoomWithWheel);
+        elem.addEventListener('panzoomchange', (ev) => {
+            const { scale } = ev.detail;
+            const subData = data[activeMainIdx].babies[activeSubIdx];
+            document.querySelectorAll('.fixed-label').forEach((l, i) => {
+                const angle = (subData.lbs && subData.lbs[i]) ? (subData.lbs[i].a || 0) : 0;
+                l.style.transform = `translate(-50%, -50%) scale(${1 / scale}) rotate(${angle}deg)`;
+            });
+        });
+    }
+
+    function setVal(qidx, v) {
+        const container = document.getElementById(`sc-${qidx}`);
+        const label = document.getElementById(`lbl-${qidx}`);
+        const texts = ["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"];
+        container.setAttribute('data-val', v);
+        label.innerText = texts[v-1];
+    }
+
+    function toggleOption(el) { el.parentElement.querySelectorAll('.opt-v').forEach(o => o.classList.remove('selected')); el.classList.add('selected'); }
+
+    function finish(idx) {
+        if(pzInstance) { pzInstance.destroy(); pzInstance = null; }
+        if(idx === babyProgress[activeMainIdx]) babyProgress[activeMainIdx]++;
+        if(babyProgress[activeMainIdx] >= data[activeMainIdx].babies.length) {
+            if(activeMainIdx === progressMain) progressMain++;
+            backToMain();
+        } else { backToSub(); }
+    }
+
+    function backToMain() { document.body.classList.remove('show-sub', 'show-map'); renderMain(); }
+    function backToSub() { if(pzInstance) { pzInstance.destroy(); pzInstance = null; } document.body.classList.remove('show-map'); renderSub(); }
+</script>
+</body>
+</html>
